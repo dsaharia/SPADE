@@ -45,3 +45,7 @@ lib/postgresql-42.2.23.jar
 lib/restfb-1.6.14.jar
 lib/slf4j-api-1.7.30.jar
 lib/xercesImpl-2.11.0.jar
+
+lib/amqp-client-5.16.0.jar
+lib/slf4j-simple-1.7.36.jar
+lib/slf4j-api-1.7.36.jar
