@@ -20,7 +20,8 @@
 package spade.reporter;
 
 import java.io.IOException;
-// import java.util.LinkedHashMap;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -30,6 +31,8 @@ import spade.core.AbstractReporter;
 // import spade.core.Edge;
 // import spade.core.Vertex;
 // import spade.utility.Execute;
+import spade.core.Settings;
+import spade.utility.HelperFunctions;
 
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
@@ -41,63 +44,82 @@ import com.rabbitmq.client.DeliverCallback;
  *
  * @author Dhiraj Saharia
  */
+
 public class P4 extends AbstractReporter {
+    private Logger logger = Logger.getLogger(P4.class.getName());
+    // Settings keys
+    private static final String keyHostname = "rabbitmqHost", keyPort = "rabbitmqPort",
+            keyUsername = "rabbitmqUsername", keyPassword = "rabbitmqPassword", keyQueueName = "rabbitmqQueueName";
     // Configure the RabbitMQ parameters once
     private volatile boolean shutdown;
-    private Logger logger = Logger.getLogger(P4.class.getName());
     ConnectionFactory factory = null;
     Connection connection = null;
     Channel channel = null;
 
     DeliverCallback deliverCallback = (consumerTag, delivery) -> {
         String message = new String(delivery.getBody(), "UTF-8");
-        parseMessage(message);
+        parseEvent(message);
         logger.log(Level.INFO, " [x] Received '" + message + "'");
     };
 
-    private void initializeRabbitMQ(String QUEUE_NAME) {
+    private void initializeRabbitMQ(Map<String, String> configMap) {
+        final String inputHostName = configMap.remove(keyHostname);
+        final int inputPort = Integer.parseInt(configMap.remove(keyPort));
+        final String inputUsername = configMap.remove(keyUsername);
+        final String inputPassword = configMap.remove(keyPassword);
+        final String inputQueueName = configMap.get(keyQueueName);
+        logger.log(Level.INFO,
+                "Arguments: [" + keyHostname + "=" + inputHostName + ", " + keyPort + "=" + inputPort + ", "
+                        + keyUsername + "=" + inputUsername + ", " + keyPassword + "=" + inputPassword + ", "
+                        + keyQueueName + "=" + inputQueueName + " ]");
         factory = new ConnectionFactory();
-        // TODO - This parameters should come from a config file
-        factory.setHost("172.18.0.2");
-        factory.setPort(5672);
-        factory.setUsername("guest");
-        factory.setPassword("guest");
+        factory.setHost(inputHostName);
+        factory.setPort(inputPort);
+        factory.setUsername(inputUsername);
+        factory.setPassword(inputPassword);
         try {
             connection = factory.newConnection();
             try {
                 channel = connection.createChannel();
-                channel.queueDeclare(QUEUE_NAME, false, false, false, null);
+                channel.queueDeclare(inputQueueName, false, false, false, null);
                 logger.log(Level.INFO, "RabbitMQ queue declared successfully");
+            } catch (Exception error) {
+                logger.log(Level.WARNING, "Failed to initialize connection", error.toString());
             }
-            catch (Exception error){
-                logger.log(Level.WARNING, "Failed to initialize connection",error.toString());
-            }
-        }
-        catch (Exception error){
+        } catch (Exception error) {
             logger.log(Level.WARNING, "Failed to initialize connection", error);
         }
     }
-    private void parseMessage(String data) {
+
+    private void parseEvent(String data) {
         String[] parts = data.split("\\|");
     }
-
 
     @Override
     public boolean launch(String arguments) {
         logger.log(Level.INFO, "P4 reporter started");
-        String QUEUE_NAME = "test";
-        initializeRabbitMQ(QUEUE_NAME);
+        /* Extract the RabbitMQ settings from cfg file */
+        final Map<String, String> map = new HashMap<String, String>();
+        try {
+            final String configFilePath = Settings.getDefaultConfigFilePath(this.getClass());
+            map.putAll(HelperFunctions.parseKeyValuePairsFrom(arguments, configFilePath, null));
+        } catch (Exception e) {
+            logger.log(Level.SEVERE, "Failed to parse arguments and/or storage config file", e);
+            return false;
+        }
+        initializeRabbitMQ(map);
 
         while (!shutdown) {
             try {
-                channel.basicConsume(QUEUE_NAME, true, deliverCallback, consumerTag -> { });
-            }
-            catch (Exception error) {
+                channel.basicConsume(map.get(keyQueueName), true, deliverCallback, consumerTag -> {
+                });
+            } catch (Exception error) {
                 logger.log(Level.WARNING, "Failed to consume message from queue", error);
             }
+            shutdown = true;
         }
         return true;
-	}
+    }
 
     @Override
     public boolean shutdown() {
