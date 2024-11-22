@@ -35,10 +35,10 @@ import spade.core.AbstractVertex;
 import spade.vertex.prov.Activity;
 import spade.vertex.prov.Agent;
 import spade.vertex.prov.Entity;
-
+import spade.edge.opm.WasControlledBy;
 import spade.edge.prov.Used;
 import spade.edge.prov.WasGeneratedBy;
-import spade.edge.prov.WasAttributedTo;
+import spade.edge.prov.WasAssociatedWith;
 
 import spade.core.Settings;
 import spade.utility.HelperFunctions;
@@ -60,17 +60,21 @@ public class P4 extends AbstractReporter {
     private static final String keyHostname = "rabbitmqHost", keyPort = "rabbitmqPort",
             keyUsername = "rabbitmqUsername", keyPassword = "rabbitmqPassword", keyQueueName = "rabbitmqQueueName";
     private static final String keyAnnotationName = "name", keyAnnotationPID = "pid",
-            keyAnnotationTimestamp = "timestamp", keyIndex = "index", keyValue = "value";
+            keyAnnotationTimestamp = "timestamp", keyIndex = "index", keyValue = "value",
+            keyActivityType = "activity_type", keyAgentType = "agent_type";
     // Configure the RabbitMQ parameters once
     private volatile boolean shutdown = false;
     final Map<String, Activity> activityMap = new HashMap<String, Activity>();
+    final Map<String, Agent> agentMap = new HashMap<String, Agent>();
     final Map<String, String> map = new HashMap<String, String>();
+
     ConnectionFactory factory = null;
     Connection connection = null;
     Channel channel = null;
     // Nodes and Edges
     AbstractVertex vertex = null;
     AbstractEdge edge = null;
+    Agent currentAgent = null;
 
     DeliverCallback deliverCallback = (consumerTag, delivery) -> {
         try {
@@ -118,7 +122,8 @@ public class P4 extends AbstractReporter {
         }
         /*
          * Event message format for reference
-         * Activity - ACTIVITY|<activity_name>|<pid>|<timestamp>|<entity_type>
+         * Activity -
+         * ACTIVITY|<activity_name>|<pid>|<timestamp>|<entity_type>
          * Agent - AGENT|<agent_name>|pid|<timestamp>|<entity_type>
          * Entity -
          * ENTITY|<entity_name>|pid|<timestamp>|<entity_type>|<entity_operation>|<
@@ -136,42 +141,54 @@ public class P4 extends AbstractReporter {
         // TODO - put the indices into const
         String eventType = parts[0];
         annotationsMap.put(keyAnnotationName, parts[1]);
-        annotationsMap.put(keyAnnotationPID, parts[2]);
-        // logger.log(Level.INFO, "annotations map " + annotationsMap.toString());
-
+        String currentPID = parts[2];
         if (eventType.equals("ACTIVITY")) {
+            String currentActivityType = parts[4];
+            annotationsMap.put(keyActivityType, currentActivityType);
+            // String agentName = parts[5];
             vertex = new Activity();
-            // Save the current activity for connecting different entity events
-            activityMap.put(annotationsMap.get(keyAnnotationPID), (Activity) vertex);
+            activityMap.put(currentPID, (Activity) vertex);
             processVertex(vertex, annotationsMap);
+            if ((currentActivityType.equals("EventProcessor")
+                    && currentAgent.getAnnotation(keyAgentType).equals("Controller"))
+                    || (currentActivityType.equals("PacketProcessor")
+                            && currentAgent.getAnnotation(keyAgentType).equals("Switch"))) {
+                WasAssociatedWith activityEdge = new WasAssociatedWith((Activity) vertex, currentAgent);
+                processEdge(activityEdge, edgeAnnotationMap);
+            }
+
         } else if (eventType.equals("AGENT")) {
             vertex = new Agent();
+            annotationsMap.put(keyAgentType, parts[4]);
             processVertex(vertex, annotationsMap);
+            currentAgent = (Agent) vertex;
+
         } else if (eventType.equals("ENTITY")) {
-            vertex = new Entity();
-            processVertex(vertex, annotationsMap);
             final Map<String, String> entityParams = parseEntityData(parts[parts.length -
                     1]);
+            vertex = new Entity();
+            annotationsMap.put(keyIndex, entityParams.get(keyIndex));
+            annotationsMap.put("entity_type", parts[4]);
+            processVertex(vertex, annotationsMap);
 
-            edgeAnnotationMap.put(keyAnnotationTimestamp, parts[3]);
-            edgeAnnotationMap.put(keyIndex, entityParams.get(keyIndex));
             edgeAnnotationMap.put(keyValue, entityParams.get(keyValue));
-            logger.log(Level.INFO, "pid " + annotationsMap.get(keyAnnotationPID));
-            logger.log(Level.INFO, "activity map: " + activityMap);
-            logger.log(Level.INFO, "activity map pid: " + activityMap.get(annotationsMap.get(keyAnnotationPID)));
+            // edgeAnnotationMap.put(keyAnnotationTimestamp, parts[3]);
+            // edgeAnnotationMap.put(keyIndex, entityParams.get(keyIndex));
+            // edgeAnnotationMap.put(keyValue, entityParams.get(keyValue));
             // if (activityMap.get(keyAnnotationPID) == null) {
             // logger.log(Level.SEVERE, "Activity does not have corresponding PID.." +
             // keyAnnotationPID);
             // return;
             // }
             edge = parseEdge(parts[5], (Entity) vertex,
-                    activityMap.get(annotationsMap.get(keyAnnotationPID)));
+                    activityMap.get(currentPID));
             if (edge != null) {
                 processEdge(edge, edgeAnnotationMap);
             }
+            // logger.log(Level.INFO, "Buffer size: " + getBuffer().size());
 
         } else {
-            logger.log(Level.SEVERE, "Event not recognized", eventType);
+            logger.log(Level.SEVERE, "Event not recognized" + eventType);
         }
     }
 
@@ -194,26 +211,21 @@ public class P4 extends AbstractReporter {
     }
 
     private void processVertex(AbstractVertex vertex, Map<String, String> map) {
-        // logger.log(Level.INFO, "process vertex");
         vertex.addAnnotations(map);
         putVertex(vertex);
     }
 
     private void processEdge(AbstractEdge edge, Map<String, String> map) {
-        // logger.log(Level.INFO, "process edge");
         edge.addAnnotations(map);
         putEdge(edge);
     }
 
     private AbstractEdge parseEdge(String operation, Entity vertex, Activity currentActivity) {
         AbstractEdge edge = null;
-        logger.log(Level.INFO, "activity: " + currentActivity);
-
         if (operation.equals("READ")) {
-            edge = new Used(currentActivity, vertex);
-
-        } else if ((operation.equals("WRITE")) | (operation.equals("ADD"))) {
-            edge = new WasGeneratedBy(vertex, currentActivity);
+            edge = new Used(currentActivity, (Entity) vertex);
+        } else if ((operation.equals("WRITE")) || (operation.equals("ADD"))) {
+            edge = new WasGeneratedBy((Entity) vertex, currentActivity);
         } else {
             logger.log(Level.WARNING, "Operation not recognized..", operation);
         }
@@ -244,18 +256,15 @@ public class P4 extends AbstractReporter {
     }
 
     private final Runnable main = new Runnable() {
-        @Override
         public void run() {
             try {
                 while (!isShutdown()) {
                     try {
-                        channel.basicConsume(map.get(keyQueueName), true, deliverCallback,
-                                consumerTag -> {
-                                });
+                        channel.basicConsume(map.get(keyQueueName), true, deliverCallback, consumerTag -> {
+                        });
                     } catch (Exception error) {
-                        logger.log(Level.WARNING, "Failed to consume message from queue", error);
+                        logger.log(Level.WARNING, "Failed to consume message from queue" + error);
                     }
-                    // logger.log(Level.INFO, "Main thread started");
                 }
             } finally {
                 logger.log(Level.INFO, "Exited main thread");
