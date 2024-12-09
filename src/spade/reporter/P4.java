@@ -35,10 +35,10 @@ import spade.core.AbstractVertex;
 import spade.vertex.prov.Activity;
 import spade.vertex.prov.Agent;
 import spade.vertex.prov.Entity;
-import spade.edge.opm.WasControlledBy;
 import spade.edge.prov.Used;
 import spade.edge.prov.WasGeneratedBy;
 import spade.edge.prov.WasAssociatedWith;
+import spade.edge.prov.WasDerivedFrom;
 
 import spade.core.Settings;
 import spade.utility.HelperFunctions;
@@ -47,6 +47,8 @@ import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
 import com.rabbitmq.client.DeliverCallback;
+
+import spade.reporter.P4StateTable;
 
 /**
  * Prov reporter for P4.
@@ -68,6 +70,9 @@ public class P4 extends AbstractReporter {
     final Map<String, Agent> agentMap = new HashMap<String, Agent>();
     final Map<String, String> map = new HashMap<String, String>();
 
+    // Initialize the state table
+    final P4StateTable stateTable = new P4StateTable();
+
     ConnectionFactory factory = null;
     Connection connection = null;
     Channel channel = null;
@@ -82,7 +87,7 @@ public class P4 extends AbstractReporter {
             logger.log(Level.INFO, " [x] Received '" + message + "'");
             parseEvent(message);
         } catch (Exception e) {
-            logger.log(Level.SEVERE, "Failed to parse message body", e);
+            logger.log(Level.SEVERE, "Failed to parse message body" + e);
         }
     };
 
@@ -108,10 +113,10 @@ public class P4 extends AbstractReporter {
                 channel.queueDeclare(inputQueueName, false, false, false, null);
                 logger.log(Level.INFO, "RabbitMQ queue declared successfully");
             } catch (Exception error) {
-                logger.log(Level.WARNING, "Failed to initialize connection", error.toString());
+                logger.log(Level.WARNING, "Failed to initialize connection" + error.toString());
             }
         } catch (Exception error) {
-            logger.log(Level.WARNING, "Failed to initialize connection", error);
+            logger.log(Level.WARNING, "Failed to initialize connection" + error);
         }
     }
 
@@ -137,11 +142,13 @@ public class P4 extends AbstractReporter {
 
         final Map<String, String> annotationsMap = new HashMap<String, String>();
         final Map<String, String> edgeAnnotationMap = new HashMap<String, String>();
+        String entityIndex = "", entityValue = "";
 
         // TODO - put the indices into const
         String eventType = parts[0];
         annotationsMap.put(keyAnnotationName, parts[1]);
         String currentPID = parts[2];
+
         if (eventType.equals("ACTIVITY")) {
             String currentActivityType = parts[4];
             annotationsMap.put(keyActivityType, currentActivityType);
@@ -160,18 +167,38 @@ public class P4 extends AbstractReporter {
         } else if (eventType.equals("AGENT")) {
             vertex = new Agent();
             annotationsMap.put(keyAgentType, parts[4]);
+            // if PKT_IN --> add the port number to agent
             processVertex(vertex, annotationsMap);
             currentAgent = (Agent) vertex;
 
         } else if (eventType.equals("ENTITY")) {
             final Map<String, String> entityParams = parseEntityData(parts[parts.length -
-                    1]);
+                    1], parts[4]);
+            String entityOperation = parts[5];
             vertex = new Entity();
-            annotationsMap.put(keyIndex, entityParams.get(keyIndex));
+            entityIndex = entityParams.get(keyIndex);
+            entityValue = entityParams.get(keyValue);
+
+            annotationsMap.put(keyIndex, entityIndex);
+            annotationsMap.put(keyValue, entityValue);
             annotationsMap.put("entity_type", parts[4]);
             processVertex(vertex, annotationsMap);
 
-            edgeAnnotationMap.put(keyValue, entityParams.get(keyValue));
+            logger.log(Level.INFO, "state table: " + stateTable);
+            Entity previousNode = stateTable.getEntity(parts[1], entityIndex);
+
+            if ((previousNode != null) && !(entityValue.equals(previousNode.getAnnotation(keyValue)))) {
+                if ((entityOperation.equals("WRITE")) || (entityOperation.equals("ADD"))) {
+                    AbstractEdge edge = new WasDerivedFrom((Entity) vertex, previousNode);
+                    putEdge(edge);
+                    logger.log(Level.INFO, "WDF: " + edge);
+                }
+            }
+            // if (entityOperation.equals("WRITE")) {
+            stateTable.put(parts[1], entityIndex, (Entity) vertex);
+            // }
+
+            // edgeAnnotationMap.put(keyValue, entityParams.get(keyValue));
             // edgeAnnotationMap.put(keyAnnotationTimestamp, parts[3]);
             // edgeAnnotationMap.put(keyIndex, entityParams.get(keyIndex));
             // edgeAnnotationMap.put(keyValue, entityParams.get(keyValue));
@@ -180,7 +207,7 @@ public class P4 extends AbstractReporter {
             // keyAnnotationPID);
             // return;
             // }
-            edge = parseEdge(parts[5], (Entity) vertex,
+            edge = parseEdge(entityOperation, (Entity) vertex,
                     activityMap.get(currentPID));
             if (edge != null) {
                 processEdge(edge, edgeAnnotationMap);
@@ -192,14 +219,20 @@ public class P4 extends AbstractReporter {
         }
     }
 
-    private Map<String, String> parseEntityData(String entityData) {
+    private Map<String, String> parseEntityData(String entityData, String entity_type) {
         Map<String, String> entityParams = new HashMap<String, String>();
 
         try {
             JSONObject jsonObject = new JSONObject(entityData);
             try {
-                entityParams.put(keyIndex, String.valueOf(jsonObject.get(keyIndex)));
-                entityParams.put(keyValue, String.valueOf(jsonObject.get(keyValue)));
+                if (entity_type.equals("MATRule")) {
+                    JSONObject value = jsonObject.getJSONObject("value");
+                    entityParams.put(keyIndex, String.valueOf(value.get("match_key")));
+                    entityParams.put(keyValue, String.valueOf(jsonObject.get(keyValue)));
+                } else {
+                    entityParams.put(keyIndex, String.valueOf(jsonObject.get(keyIndex)));
+                    entityParams.put(keyValue, String.valueOf(jsonObject.get(keyValue)));
+                }
 
             } catch (Exception e) {
                 logger.log(Level.SEVERE, "Cannot find entity params as index and value", e);
@@ -227,7 +260,7 @@ public class P4 extends AbstractReporter {
         } else if ((operation.equals("WRITE")) || (operation.equals("ADD"))) {
             edge = new WasGeneratedBy((Entity) vertex, currentActivity);
         } else {
-            logger.log(Level.WARNING, "Operation not recognized..", operation);
+            logger.log(Level.WARNING, "Operation not recognized.." + operation);
         }
         return edge;
     }
@@ -240,7 +273,7 @@ public class P4 extends AbstractReporter {
             final String configFilePath = Settings.getDefaultConfigFilePath(this.getClass());
             map.putAll(HelperFunctions.parseKeyValuePairsFrom(arguments, configFilePath, null));
         } catch (Exception e) {
-            logger.log(Level.SEVERE, "Failed to parse arguments and/or storage config file", e);
+            logger.log(Level.SEVERE, "Failed to parse arguments and/or storage config file" + e);
             return false;
         }
         initializeRabbitMQ(map);
