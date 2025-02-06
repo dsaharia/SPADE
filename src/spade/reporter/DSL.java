@@ -43,7 +43,7 @@ public class DSL extends AbstractReporter {
     private String pipePath;
     private BufferedReader eventReader;
     private volatile boolean shutdown;
-    //private HashMap<String, AbstractVertex> vertices;
+    // private HashMap<String, AbstractVertex> vertices;
     private final int THREAD_SLEEP_DELAY = 5;
     private Logger logger = Logger.getLogger(DSL.class.getName());
 
@@ -55,21 +55,22 @@ public class DSL extends AbstractReporter {
         // The Pipe reporter creates a simple named pipe to which provenance events
         // can be written. The argument to the launch method is the location of the
         // pipe.
-        //vertices = new HashMap<String, AbstractVertex>();
+        // vertices = new HashMap<String, AbstractVertex>();
         pipePath = arguments;
         File checkpipe = new File(pipePath);
         if (checkpipe.exists()) {
-        	logger.log(Level.SEVERE, "A filesystem entry already exists at path already exists: '"+pipePath+"'. Please specify a"
-        			+ " path with no filesystem entry.");
+            logger.log(Level.SEVERE,
+                    "A filesystem entry already exists at path already exists: '" + pipePath + "'. Please specify a"
+                            + " path with no filesystem entry.");
             return false;
         } else {
             try {
-            	final Execute.Output output = Execute.getOutput("mkfifo " + pipePath);
-            	if(output.hasError()){
-            		logger.log(Level.SEVERE, "Failed to create pipe at path: '"+pipePath+"'");
-            		output.log();
-            		return false;
-            	}
+                final Execute.Output output = Execute.getOutput("mkfifo " + pipePath);
+                if (output.hasError()) {
+                    logger.log(Level.SEVERE, "Failed to create pipe at path: '" + pipePath + "'");
+                    output.log();
+                    return false;
+                }
                 Runnable eventThread = new Runnable() {
 
                     public void run() {
@@ -93,7 +94,7 @@ public class DSL extends AbstractReporter {
                 new Thread(eventThread, "PipeReporter-Thread").start();
                 return true;
             } catch (Exception exception) {
-                logger.log(Level.SEVERE, "Failed to start reporter using pipe at path: '"+pipePath+"'", exception);
+                logger.log(Level.SEVERE, "Failed to start reporter using pipe at path: '" + pipePath + "'", exception);
                 return false;
             }
         }
@@ -131,25 +132,25 @@ public class DSL extends AbstractReporter {
             }
             // Instantiate object based on the type and associate annotations to it.
 
-            if(AbstractVertex.isVertexType(type)){
-            	vertex = new Vertex(id);
-            	annotations.put(AbstractVertex.typeKey, type);
-            	vertex.addAnnotations(annotations);
-            	putVertex(vertex);
-            }else if(AbstractEdge.isEdgeType(type)){
-            	edge = new Edge(new Vertex(from), new Vertex(to));
-            	annotations.put(AbstractEdge.typeKey, type);
-            	edge.addAnnotations(annotations);
-            	putEdge(edge);
-            }else{
-            	logger.log(Level.WARNING, "Unexpected 'type' in input: " + line);
+            if (AbstractVertex.isVertexType(type)) {
+                vertex = new Vertex(id);
+                annotations.put(AbstractVertex.typeKey, type);
+                vertex.addAnnotations(annotations);
+                putVertex(vertex);
+            } else if (AbstractEdge.isEdgeType(type)) {
+                edge = new Edge(new Vertex(from), new Vertex(to));
+                annotations.put(AbstractEdge.typeKey, type);
+                edge.addAnnotations(annotations);
+                putEdge(edge);
+            } else {
+                logger.log(Level.WARNING, "Unexpected 'type' in input: " + line);
             }
         } catch (Exception exception) {
             logger.log(Level.SEVERE, null, exception);
         }
     }
 
-	private String getKey(String token) {
+    private String getKey(String token) {
         // Return the key after removing escaping backslashes. The backslashes
         // are detected using positive lookbehind.
         return token.split("(?<!\\\\):")[0].replaceAll("\\\\(?=[: ])", "");

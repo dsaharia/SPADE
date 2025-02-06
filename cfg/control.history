@@ -1,0 +1,113 @@
+add reporter add storage Graphviz output=/tmp/provenance.dot
+add storage Graphviz output=/tmp/provenance.dot
+remove storage Graphviz
+exit
+add storage Graphviz output=/tmp/provenance.dot
+remove storage Graphviz
+stop
+exit
+add storage Graphviz output=/tmp/provenance.dot
+list storages 
+remove storage Graphviz
+ls
+exit
+add storage Graphviz output=/tmp/provenance.dot
+remove storage Graphviz
+exit
+add storage JSON output=/tmp/provenance.json
+remove storage JSON
+exit
+remove storage JSON
+exit
+list reporters
+list storage
+list storages
+remove storage 
+remove storage Graphviz
+exit
+list controllers
+list storages
+remove storage Graphviz
+exit
+remove storage Graphviz
+list reporters
+add reporter P4
+list reporters
+list storages
+add storage Graphviz output=/SPADE/tmp/provenance.dot
+list storages
+list reporters
+remove storage Graphviz
+stop
+exit
+list reporters
+list storages
+add storage Graphviz output=/SPADE/tmp/provenance.dot
+list reporters
+add reporter P4
+add storage Graphviz output=/SPADE/tmp/provenance.dot
+remove storage Graphviz
+set
+set storage
+exit
+list reporters
+list storages
+exit
+list reporters
+list storages
+list all
+add storage Graphviz output=/SPADE/tmp/provenance.dot
+list all
+add reporter P4
+list all
+add reporter P4
+list all
+exit
+list all
+exit
+list reporters
+list storages
+remove storage Graphviz
+set storage Neo4j
+list storages
+list reporters
+list storages
+set storage Neo4j
+exit
+add analyzer CommandLine
+exit
+list storages 
+add storage Neo4j
+exit
+remove storage neo4j
+remove storage Neo4j
+add storage Neo4j
+exit
+list reporters 
+list storages
+set storage Neo4j
+list analyzers 
+remove storage Neo4j
+set storage Neo4j
+add storage Neo4j
+set storage Neo4j
+exit
+list reporters 
+list storages 
+remove storage Neo4j
+exit
+list all
+add analyzer CommandLine
+list all
+exit
+lsit all
+list all
+add analyzer CommandLine
+list all
+exit
+list all
+exit
+list all
+exit
+list all
+exit

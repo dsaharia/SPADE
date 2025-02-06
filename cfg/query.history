@@ -1,0 +1,78 @@
+set storage Neo4j
+list env
+set storage neo4j
+set storage Neo4j
+list storages
+help
+print storage
+set storage
+set storage Neo4j
+quit()
+exit
+set storage Neo4j
+$graph
+$base
+help
+list graph
+stat $base
+export > /tmp/count.dot
+dump all $base
+exit
+/SPADE/bin/spade query
+set storage Neo4j
+help
+stat $base
+help
+exit
+stat $base
+help
+print storage
+exit
+set storage Neo4j
+stat $base
+exiy
+exit
+stat $base
+exit
+stat $base
+set storage Neo4j
+stat $base
+exit
+stat $base
+help
+stat $base
+%init_evidence = "index" == 16777216
+$init_vertex = $base.getVertex(%init_evidence)
+$lineage = $base.getLineage($init_vertex, 10, 'descendants')
+export > tmp/lineage.dot
+dump all $lineage
+$lineage2 = $base.getLineage($init_vertex, 10, 'ancestors')
+stat $lineage
+stat $lineage2
+dump all $lineage
+export > tmp/lineage.dot
+dump all $lineage2
+exit
+set storage Neo4j
+quit()
+exit
+set storage Neo4j
+$stat base
+$stat $base
+stat $base
+%init_evidence = "index" == "TERNARY-0a:00:00:0b &&& ff:ff:ff:ff"
+%init_evidence = "index" == TERNARY-0a:00:00:0b &&& ff:ff:ff:ff
+%init_evidence = "index" == 'TERNARY-0a:00:00:0b &&& ff:ff:ff:ff'
+%init_evidence
+help
+%init_evidence = "index" == 'TERNARY-0a:00:00:0b &&& ff:ff:ff:ff'
+%init_evidence
+list
+$init_vertex = $base.getVertex(%init_evidence)
+$init_vertex
+$lineage = $base.getLineage($init_vertex, 10, 'ancestors') 
+$stat $lineage
+stat $lineage
+export > tmp/lineage_new.dot
+dump all $lineage
+exit
