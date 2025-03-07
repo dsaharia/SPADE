@@ -4,38 +4,68 @@ import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import spade.core.AbstractEdge;
 import spade.vertex.prov.Entity;
+import spade.edge.prov.WasDerivedFrom;
 
 public class P4StateTable {
-    // <entity_name, index> : <[hashID]>
-    Map<AbstractMap.SimpleEntry<String, String>, List<Entity>> stateTable = new HashMap<>();
+
+    String keyValue = "value", keyIndex = "index";
     public Logger logger = Logger.getLogger(P4StateTable.class.getName());
+    HashMap<String, List<Entity>> stateTable = new HashMap<>();
 
-    public void put(String entityType, String entityIndex, Entity entity) {
-        // Add to state table if does not exist
-        AbstractMap.SimpleEntry<String, String> currentKey = new AbstractMap.SimpleEntry<>(entityType, entityIndex);
-        if (stateTable.containsKey(currentKey)) {
-            Entity lastEntity = getEntity(entityType, entityIndex);
-            if (lastEntity != entity) {
-                logger.log(Level.INFO, "here");
-                stateTable.get(currentKey).add(entity);
-            }
-        } else {
-            List<Entity> newList = new ArrayList<>();
-            newList.add(entity);
-            stateTable.put(currentKey, newList);
+    public AbstractEdge performStateCheck(String entityOperation, Entity currentEntity) {
+        String entityIndex = currentEntity.getAnnotation(keyIndex);
+        String agentId = currentEntity.getAnnotation("agent_id");
+        String entityKey = currentEntity.getAnnotation("name") + "_" + agentId + "_" + entityIndex;
+        Entity previousNode = getEntity(entityKey);
+        if (previousNode == null) {
+            // First node for this entity. Therefore, add to StateTable - 
+            addToStateTable(entityKey, (Entity) currentEntity);
+            logger.log(Level.INFO, "Previous Node NULL" + stateTable);
+            return null;
         }
-
+        // Previous value exists
+        String previousEntityValue = previousNode.getAnnotation(keyValue);
+        String currentEntityValue = currentEntity.getAnnotation(keyValue);
+        if (entityOperation.equals("WRITE")) {
+            if (!(currentEntityValue.equals(previousEntityValue))) {
+                // WDF Edge needed
+                AbstractEdge edge = new WasDerivedFrom(currentEntity, previousNode);
+                // super.putEdge(edge);
+                logger.log(Level.INFO, "WDF edge added: " + edge);
+                // Add new state value
+                addToStateTable(entityKey, (Entity) currentEntity);
+                return edge;
+            }
+        }
+        return null;
     }
 
-    public Entity getEntity(String entityType, String entityIndex) {
-        AbstractMap.SimpleEntry<String, String> currentKey = new AbstractMap.SimpleEntry<>(entityType, entityIndex);
-
-        if (stateTable.containsKey(currentKey)) {
-            List<Entity> list = stateTable.get(currentKey);
+    public Entity getEntity(String entityKey) {
+        if (stateTable.containsKey(entityKey)) {
+            List<Entity> list = stateTable.get(entityKey);
             return list.get(list.size() - 1);
         }
         return null;
+    }
+
+    public void addToStateTable(String entityKey, Entity entity) {
+
+        if (stateTable.containsKey(entityKey)) {
+
+            // if !(currentEntityValue.equals(previousEntityValue)) {
+                stateTable.get(entityKey).add(entity);
+            // }
+
+        } 
+        else {
+            // Initialize state table entry
+            List<Entity> newList = new ArrayList<>();
+            newList.add(entity);
+            stateTable.put(entityKey, newList);
+        }
+
     }
 
     public String toString() {
