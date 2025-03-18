@@ -51,7 +51,7 @@ import com.rabbitmq.client.DeliverCallback;
 import spade.reporter.P4StateTable;
 
 /**
- * Prov reporter for P4.
+ * Provenance reporter for P4.
  *
  * @author Dhiraj Saharia
  */
@@ -61,9 +61,13 @@ public class P4 extends AbstractReporter {
     // Settings keys
     private static final String keyHostname = "rabbitmqHost", keyPort = "rabbitmqPort",
             keyUsername = "rabbitmqUsername", keyPassword = "rabbitmqPassword", keyQueueName = "rabbitmqQueueName";
+    // Annotation keys
     private static final String keyAnnotationName = "name", keyAnnotationPID = "pid",
             keyAnnotationTimestamp = "timestamp", keyIndex = "index", keyValue = "value",
-            keyActivityType = "activity_type", keyAgentType = "agent_type";
+            keyActivityType = "activity_type", keyAgentType = "agent_type", keyAgentID = "agent_id";
+    // Indices to correctly parse the message data
+    private static final int indexEventType = 0, indexName = 1, indexAgentId = 2, indexTimestamp = 3,
+            indexType = 4, indexCallType = 5, indexEntityData = 6;
     // Configure the RabbitMQ parameters once
     private volatile boolean shutdown = false;
     final Map<String, Activity> activityMap = new HashMap<String, Activity>();
@@ -87,7 +91,7 @@ public class P4 extends AbstractReporter {
             logger.log(Level.INFO, " [x] Received '" + message + "'");
             parseEvent(message);
         } catch (Exception e) {
-            logger.log(Level.SEVERE, "Failed to parse message body" + e);
+            logger.log(Level.SEVERE, "Failed to parse message body " + e);
         }
     };
 
@@ -138,64 +142,108 @@ public class P4 extends AbstractReporter {
          */
 
         String[] parts = data.split("\\|");
-        // logger.log(Level.INFO, "parts: " + parts);
 
         final Map<String, String> annotationsMap = new HashMap<String, String>();
         final Map<String, String> edgeAnnotationMap = new HashMap<String, String>();
         String entityIndex = "", entityValue = "";
 
         // TODO - put the indices into const
-        String eventType = parts[0];
-        annotationsMap.put(keyAnnotationName, parts[1]);
-        String currentPID = parts[2];
+        String eventType = parts[indexEventType];
+        String nodeName = parts[indexName];
+        annotationsMap.put(keyAnnotationName, nodeName);
+        String currentID = parts[indexAgentId];
 
         if (eventType.equals("ACTIVITY")) {
-            String currentActivityType = parts[4];
+            String currentActivityType = parts[indexType];
             annotationsMap.put(keyActivityType, currentActivityType);
-            // String agentName = parts[5];
             vertex = new Activity();
-            activityMap.put(currentPID, (Activity) vertex);
+            activityMap.put(currentID, (Activity) vertex);
+            // annotationsMap.put("agent_id", currentAgent.getAnnotation(keyAgentID));
+            annotationsMap.put("agent_id", currentID);
+
             processVertex(vertex, annotationsMap);
             if ((currentActivityType.equals("EventProcessor")
                     && currentAgent.getAnnotation(keyAgentType).equals("Controller"))
                     || (currentActivityType.equals("PacketProcessor")
                             && currentAgent.getAnnotation(keyAgentType).equals("Switch"))) {
                 WasAssociatedWith activityEdge = new WasAssociatedWith((Activity) vertex, currentAgent);
-                processEdge(activityEdge, edgeAnnotationMap);
+                logger.log(Level.INFO, "IDS: " + currentID + " " + currentAgent.getAnnotation(keyAgentID));
+                if (currentID.equals(currentAgent.getAnnotation(keyAgentID))) {
+                    logger.log(Level.INFO, "here");
+                    processEdge(activityEdge, edgeAnnotationMap);
+                }
             }
 
         } else if (eventType.equals("AGENT")) {
             vertex = new Agent();
-            annotationsMap.put(keyAgentType, parts[4]);
+            annotationsMap.put(keyAgentType, parts[indexType]);
+            annotationsMap.put(keyAgentID, currentID);
             // if PKT_IN --> add the port number to agent
             processVertex(vertex, annotationsMap);
             currentAgent = (Agent) vertex;
 
         } else if (eventType.equals("ENTITY")) {
+            // We have to handle different entities separately because they have different
+            // data inside them
             final Map<String, String> entityParams = parseEntityData(parts[parts.length -
-                    1], parts[4]);
-            String entityOperation = parts[5];
+                    1], parts[indexType]);
+            String entityOperation = parts[indexCallType];
+            String entity_type = parts[indexType];
             vertex = new Entity();
-            entityIndex = entityParams.get(keyIndex);
-            entityValue = entityParams.get(keyValue);
+            if (entity_type.equals("packet_in")) {
+                annotationsMap.put("src_mac", entityParams.get("src_mac"));
+                annotationsMap.put("ingress_port", entityParams.get("ingress_port"));
+                annotationsMap.put("ether_type", entityParams.get("ether_type"));
 
-            annotationsMap.put(keyIndex, entityIndex);
-            annotationsMap.put(keyValue, entityValue);
-            annotationsMap.put("entity_type", parts[4]);
+            } else if (entity_type.equals("table_rule")) {
+                annotationsMap.put("ingress_port", entityParams.get("ingress_port"));
+                annotationsMap.put("egress_port", entityParams.get("egress_port"));
+                annotationsMap.put("ether_type", entityParams.get("ether_type"));
+            } else {
+                // Add register values
+                entityIndex = entityParams.get(keyIndex);
+                entityValue = entityParams.get(keyValue);
+                annotationsMap.put(keyIndex, entityIndex);
+                annotationsMap.put(keyValue, entityValue);
+            }
+            annotationsMap.put("entity_type", parts[indexType]);
+            annotationsMap.put(keyAgentID, currentID);
             processVertex(vertex, annotationsMap);
 
-            logger.log(Level.INFO, "state table: " + stateTable);
-            Entity previousNode = stateTable.getEntity(parts[1], entityIndex);
-
-            if ((previousNode != null) && !(entityValue.equals(previousNode.getAnnotation(keyValue)))) {
-                if ((entityOperation.equals("WRITE")) || (entityOperation.equals("ADD"))) {
-                    AbstractEdge edge = new WasDerivedFrom((Entity) vertex, previousNode);
-                    putEdge(edge);
-                    logger.log(Level.INFO, "WDF: " + edge);
-                }
+            // Entity previousNode = stateTable.getEntity(parts[indexName], currentPID,
+            // entityIndex);
+            AbstractEdge WDFedge = new WasDerivedFrom(null, null);
+            WDFedge = stateTable.performStateCheck(entityOperation, (Entity) vertex);
+            if (WDFedge != null) {
+                putEdge(WDFedge);
             }
+
+            // New State table algorithm
+
+            // String currentEntityValue = entityValue;
+            // String previousEntityValue = previousNode.getAnnotation(keyValue);
+
+            // if (previousEntityValue == null) {
+            // logger.log(Level.WARN, "Previous Entity value NULL detected...");
+            // }
             // if (entityOperation.equals("WRITE")) {
-            stateTable.put(parts[1], entityIndex, (Entity) vertex);
+            // if !(currentEntityValue.equals(previousEntityValue)) {
+            // // WasDerivedFrom Edge
+            // AbstractEdge edge = new WasDerivedFrom((Entity) vertex, previousNode);
+            // putEdge(edge);
+            // logger.log(Level.INFO, "WasDerivedFrom Edge: " + edge);
+            // // Add new value to state
+            // stateTable.put(parts[indexName], currentPID, entityIndex, (Entity) vertex);
+            // }
+
+            // if ((previousNode != null) &&
+            // !(entityValue.equals(previousNode.getAnnotation(keyValue)))) {
+            // if ((entityOperation.equals("WRITE")) || (entityOperation.equals("ADD"))) {
+            // AbstractEdge edge = new WasDerivedFrom((Entity) vertex, previousNode);
+            // putEdge(edge);
+            // logger.log(Level.INFO, "WDF: " + edge);
+            // // if (entityOperation.equals("WRITE")) {
+            // stateTable.put(parts[indexName], currentPID, entityIndex, (Entity) vertex);
             // }
 
             // edgeAnnotationMap.put(keyValue, entityParams.get(keyValue));
@@ -208,11 +256,12 @@ public class P4 extends AbstractReporter {
             // return;
             // }
             edge = parseEdge(entityOperation, (Entity) vertex,
-                    activityMap.get(currentPID));
-            if (edge != null) {
+                    activityMap.get(currentID));
+            logger.log(Level.INFO,
+                    "edgeIDs: " + currentID + " " + activityMap.get(currentID).getAnnotation(keyAgentID));
+            if ((edge != null) && (currentID.equals(activityMap.get(currentID).getAnnotation(keyAgentID)))) {
                 processEdge(edge, edgeAnnotationMap);
             }
-            // logger.log(Level.INFO, "Buffer size: " + getBuffer().size());
 
         } else {
             logger.log(Level.SEVERE, "Event not recognized" + eventType);
@@ -221,7 +270,7 @@ public class P4 extends AbstractReporter {
 
     private Map<String, String> parseEntityData(String entityData, String entity_type) {
         Map<String, String> entityParams = new HashMap<String, String>();
-
+        logger.log(Level.INFO, "Entity type - " + entity_type);
         try {
             JSONObject jsonObject = new JSONObject(entityData);
             try {
@@ -229,6 +278,16 @@ public class P4 extends AbstractReporter {
                     JSONObject value = jsonObject.getJSONObject("value");
                     entityParams.put(keyIndex, String.valueOf(value.get("match_key")));
                     entityParams.put(keyValue, String.valueOf(jsonObject.get(keyValue)));
+                } else if (entity_type.equals("packet_in")) {
+                    // JSONObject value = jsonObject.getJSONObject("value");
+                    entityParams.put("src_mac", String.valueOf(jsonObject.get("src_mac")));
+                    entityParams.put("ingress_port", String.valueOf(jsonObject.get("ingress_port")));
+                    entityParams.put("ether_type", String.valueOf(jsonObject.get("ether_type")));
+                } else if (entity_type.equals("table_rule")) {
+                    // JSONObject value = jsonObject.getJSONObject("value");
+                    entityParams.put("ingress_port", String.valueOf(jsonObject.get("ingress_port")));
+                    entityParams.put("egress_port", String.valueOf(jsonObject.get("egress_port")));
+                    entityParams.put("ether_type", String.valueOf(jsonObject.get("ether_type")));
                 } else {
                     entityParams.put(keyIndex, String.valueOf(jsonObject.get(keyIndex)));
                     entityParams.put(keyValue, String.valueOf(jsonObject.get(keyValue)));
@@ -282,6 +341,7 @@ public class P4 extends AbstractReporter {
             thread.start();
 
         } catch (Exception e) {
+            logger.log(Level.WARNING, "thread error");
             shutdown();
             // throw new Exception("Failed to start main thread", e);
         }
@@ -296,7 +356,8 @@ public class P4 extends AbstractReporter {
                         channel.basicConsume(map.get(keyQueueName), true, deliverCallback, consumerTag -> {
                         });
                     } catch (Exception error) {
-                        logger.log(Level.WARNING, "Failed to consume message from queue" + error);
+                        logger.log(Level.WARNING, "Failed to consume message from queue - " + error);
+                        // return;
                     }
                 }
             } finally {
