@@ -14,13 +14,14 @@ public class P4StateTable {
     public Logger logger = Logger.getLogger(P4StateTable.class.getName());
     HashMap<String, List<Entity>> stateTable = new HashMap<>();
 
-    public AbstractEdge performStateCheck(String entityOperation, Entity currentEntity) {
-        String entityIndex = currentEntity.getAnnotation(keyIndex);
+    public AbstractEdge performStateCheck(String entityOperation, String entity_type, Entity currentEntity) {
+        // TODO - Entity index is different for pkt_in, table rule or register - FIX ME
+        String entityID = currentEntity.getAnnotation(keyIndex);
         String agentId = currentEntity.getAnnotation("agent_id");
-        String entityKey = currentEntity.getAnnotation("name") + "_" + agentId + "_" + entityIndex;
+        String entityKey = currentEntity.getAnnotation("name") + "_" + agentId + "_" + entityID;
         Entity previousNode = getEntity(entityKey);
         if (previousNode == null) {
-            // First node for this entity. Therefore, add to StateTable - 
+            // First node for this entity. Therefore, add to StateTable -
             addToStateTable(entityKey, (Entity) currentEntity);
             logger.log(Level.INFO, "Previous Node NULL" + stateTable);
             return null;
@@ -36,6 +37,9 @@ public class P4StateTable {
                 logger.log(Level.INFO, "WDF edge added: " + edge);
                 // Add new state value
                 addToStateTable(entityKey, (Entity) currentEntity);
+                if (entityID.equals("255")) {
+                    logger.log(Level.INFO, "State table " + stateTable);
+                }
                 return edge;
             }
         }
@@ -53,13 +57,8 @@ public class P4StateTable {
     public void addToStateTable(String entityKey, Entity entity) {
 
         if (stateTable.containsKey(entityKey)) {
-
-            // if !(currentEntityValue.equals(previousEntityValue)) {
-                stateTable.get(entityKey).add(entity);
-            // }
-
-        } 
-        else {
+            stateTable.get(entityKey).add(entity);
+        } else {
             // Initialize state table entry
             List<Entity> newList = new ArrayList<>();
             newList.add(entity);
