@@ -86,12 +86,13 @@ public class P4 extends AbstractReporter {
     Agent currentAgent = null;
 
     DeliverCallback deliverCallback = (consumerTag, delivery) -> {
+        String message = "";
         try {
-            String message = new String(delivery.getBody(), "UTF-8");
+            message = new String(delivery.getBody(), "UTF-8");
             logger.log(Level.INFO, " [x] Received '" + message + "'");
             parseEvent(message);
         } catch (Exception e) {
-            logger.log(Level.SEVERE, "Failed to parse message body " + e);
+            logger.log(Level.SEVERE, "Failed to parse message body - " + message + "Error - " + e);
         }
     };
 
@@ -129,6 +130,7 @@ public class P4 extends AbstractReporter {
             logger.log(Level.SEVERE, "Received null or empty data in parseEvent.");
             return;
         }
+        logger.log(Level.INFO, map.toString());
         /*
          * Event message format for reference
          * Activity -
@@ -167,9 +169,10 @@ public class P4 extends AbstractReporter {
                     || (currentActivityType.equals("PacketProcessor")
                             && currentAgent.getAnnotation(keyAgentType).equals("Switch"))) {
                 WasAssociatedWith activityEdge = new WasAssociatedWith((Activity) vertex, currentAgent);
-                logger.log(Level.INFO, "IDS: " + currentID + " " + currentAgent.getAnnotation(keyAgentID));
+                // logger.log(Level.INFO, "IDS: " + currentID + " " +
+                // currentAgent.getAnnotation(keyAgentID));
                 if (currentID.equals(currentAgent.getAnnotation(keyAgentID))) {
-                    logger.log(Level.INFO, "here");
+                    // logger.log(Level.INFO, "here");
                     processEdge(activityEdge, edgeAnnotationMap);
                 }
             }
@@ -194,11 +197,18 @@ public class P4 extends AbstractReporter {
                 annotationsMap.put("src_mac", entityParams.get("src_mac"));
                 annotationsMap.put("ingress_port", entityParams.get("ingress_port"));
                 annotationsMap.put("ether_type", entityParams.get("ether_type"));
+                annotationsMap.put("lldp_id", entityParams.get("lldp_id"));
+                // TODO --> Remove agent id on pkt_in
 
             } else if (entity_type.equals("table_rule")) {
                 annotationsMap.put("ingress_port", entityParams.get("ingress_port"));
                 annotationsMap.put("egress_port", entityParams.get("egress_port"));
                 annotationsMap.put("ether_type", entityParams.get("ether_type"));
+            } else if (entity_type.equals("packet_out")) {
+                annotationsMap.put("src_mac", entityParams.get("src_mac"));
+                annotationsMap.put("egress_port", entityParams.get("egress_port"));
+                annotationsMap.put("ether_type", entityParams.get("ether_type"));
+                annotationsMap.put("lldp_id", entityParams.get("lldp_id"));
             } else {
                 // Add register values
                 entityIndex = entityParams.get(keyIndex);
@@ -212,10 +222,13 @@ public class P4 extends AbstractReporter {
 
             // Entity previousNode = stateTable.getEntity(parts[indexName], currentPID,
             // entityIndex);
-            AbstractEdge WDFedge = new WasDerivedFrom(null, null);
-            WDFedge = stateTable.performStateCheck(entityOperation, (Entity) vertex);
-            if (WDFedge != null) {
-                putEdge(WDFedge);
+            if (entity_type.equals("register")) {
+                // NOTE - wDF edges are defined for stateful memory only - Registers
+                AbstractEdge WDFedge = new WasDerivedFrom(null, null);
+                WDFedge = stateTable.performStateCheck(entityOperation, entity_type, (Entity) vertex);
+                if (WDFedge != null) {
+                    putEdge(WDFedge);
+                }
             }
 
             // New State table algorithm
@@ -236,16 +249,6 @@ public class P4 extends AbstractReporter {
             // stateTable.put(parts[indexName], currentPID, entityIndex, (Entity) vertex);
             // }
 
-            // if ((previousNode != null) &&
-            // !(entityValue.equals(previousNode.getAnnotation(keyValue)))) {
-            // if ((entityOperation.equals("WRITE")) || (entityOperation.equals("ADD"))) {
-            // AbstractEdge edge = new WasDerivedFrom((Entity) vertex, previousNode);
-            // putEdge(edge);
-            // logger.log(Level.INFO, "WDF: " + edge);
-            // // if (entityOperation.equals("WRITE")) {
-            // stateTable.put(parts[indexName], currentPID, entityIndex, (Entity) vertex);
-            // }
-
             // edgeAnnotationMap.put(keyValue, entityParams.get(keyValue));
             // edgeAnnotationMap.put(keyAnnotationTimestamp, parts[3]);
             // edgeAnnotationMap.put(keyIndex, entityParams.get(keyIndex));
@@ -260,6 +263,7 @@ public class P4 extends AbstractReporter {
             logger.log(Level.INFO,
                     "edgeIDs: " + currentID + " " + activityMap.get(currentID).getAnnotation(keyAgentID));
             if ((edge != null) && (currentID.equals(activityMap.get(currentID).getAnnotation(keyAgentID)))) {
+                logger.log(Level.INFO, "edge - " + edge);
                 processEdge(edge, edgeAnnotationMap);
             }
 
@@ -270,7 +274,7 @@ public class P4 extends AbstractReporter {
 
     private Map<String, String> parseEntityData(String entityData, String entity_type) {
         Map<String, String> entityParams = new HashMap<String, String>();
-        logger.log(Level.INFO, "Entity type - " + entity_type);
+        // logger.log(Level.INFO, "Entity type - " + entity_type);
         try {
             JSONObject jsonObject = new JSONObject(entityData);
             try {
@@ -279,22 +283,39 @@ public class P4 extends AbstractReporter {
                     entityParams.put(keyIndex, String.valueOf(value.get("match_key")));
                     entityParams.put(keyValue, String.valueOf(jsonObject.get(keyValue)));
                 } else if (entity_type.equals("packet_in")) {
-                    // JSONObject value = jsonObject.getJSONObject("value");
-                    entityParams.put("src_mac", String.valueOf(jsonObject.get("src_mac")));
-                    entityParams.put("ingress_port", String.valueOf(jsonObject.get("ingress_port")));
-                    entityParams.put("ether_type", String.valueOf(jsonObject.get("ether_type")));
+                    entityParams.put("src_mac",
+                            jsonObject.has("src_mac") ? String.valueOf(jsonObject.get("src_mac")) : "0");
+                    entityParams.put("lldp_id",
+                            jsonObject.has("lldp_id") ? String.valueOf(jsonObject.get("lldp_id")) : "0");
+                    entityParams.put("ingress_port",
+                            jsonObject.has("ingress_port") ? String.valueOf(jsonObject.get("ingress_port"))
+                                    : "-1");
+                    entityParams.put("ether_type",
+                            jsonObject.has("ether_type") ? String.valueOf(jsonObject.get("ether_type"))
+                                    : "-1");
                 } else if (entity_type.equals("table_rule")) {
                     // JSONObject value = jsonObject.getJSONObject("value");
                     entityParams.put("ingress_port", String.valueOf(jsonObject.get("ingress_port")));
                     entityParams.put("egress_port", String.valueOf(jsonObject.get("egress_port")));
                     entityParams.put("ether_type", String.valueOf(jsonObject.get("ether_type")));
+                } else if (entity_type.equals("packet_out")) {
+                    entityParams.put("src_mac",
+                            jsonObject.has("src_mac") ? String.valueOf(jsonObject.get("src_mac")) : "0");
+                    entityParams.put("lldp_id",
+                            jsonObject.has("lldp_id") ? String.valueOf(jsonObject.get("lldp_id")) : "0");
+                    entityParams.put("egress_port",
+                            jsonObject.has("egress_port") ? String.valueOf(jsonObject.get("egress_port"))
+                                    : "-1");
+                    entityParams.put("ether_type",
+                            jsonObject.has("ether_type") ? String.valueOf(jsonObject.get("ether_type"))
+                                    : "-1");
                 } else {
                     entityParams.put(keyIndex, String.valueOf(jsonObject.get(keyIndex)));
                     entityParams.put(keyValue, String.valueOf(jsonObject.get(keyValue)));
                 }
 
             } catch (Exception e) {
-                logger.log(Level.SEVERE, "Cannot find entity params as index and value", e);
+                logger.log(Level.SEVERE, "Cannot find entity params", e);
             }
         } catch (JSONException err) {
             logger.log(Level.WARNING, err.toString());
